@@ -1,5 +1,5 @@
 // 一度開いたら、電波がなくても遊べるようにする（ネットにつながるときは新しい版を取りに行く）
-const CACHE = "tenpairs-v1";
+const CACHE = "tenpairs-v2";
 const FILES = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", e => { e.waitUntil(caches.keys().then(ks => Promise.all(ks.filter(k => k !== CACHE).map(k => caches.delete(k))))); self.clients.claim(); });
