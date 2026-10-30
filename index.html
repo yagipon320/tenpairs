@@ -67,6 +67,20 @@ h1 span { color: var(--accent) }
 .card .big { font-family: var(--display); font-size: 44px; font-weight: 800; color: var(--accent) }
 .btn { border: 0; background: var(--accent); color: var(--paper); border-radius: 12px; padding: 12px; font-weight: 700 }
 .btn.ghost { background: transparent; color: var(--ink); border: 1.5px solid var(--ink) }
+.lvl { display: inline-block; font-size: 11px; font-weight: 700; padding: 1px 8px; border-radius: 99px; background: var(--accent-soft); color: var(--accent); margin-right: 6px }
+.card.wide { max-width: 440px; max-height: 90vh; overflow-y: auto; text-align: left }
+.card.wide h2 { text-align: center }
+.seg { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px }
+.seg button { border: 1.5px solid var(--ink); background: transparent; border-radius: 10px; padding: 8px 4px; display: grid; gap: 1px; font-size: 14px; font-weight: 700 }
+.seg button small { font-size: 11px; font-weight: 400; color: var(--muted) }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--paper) } .seg button[aria-pressed="true"] small { color: var(--paper); opacity: .75 }
+.sgrid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px }
+.sbtn { aspect-ratio: 1; border: 1.5px solid var(--grid); background: var(--paper); border-radius: 10px; font-family: var(--display); font-weight: 600; font-size: 17px; display: grid; place-items: center; position: relative; padding: 0 }
+.sbtn.done { border-color: var(--ink); background: var(--ink); color: var(--paper) }
+.sbtn.cur { border-color: var(--accent); box-shadow: inset 0 0 0 1.5px var(--accent) }
+.sbtn:disabled { color: var(--gone); cursor: default }
+.sbtn .lock { position: absolute; font-size: 10px; bottom: 2px }
+.note { font-size: 12px; color: var(--muted); margin: 0 }
 </style>
 
 </head><body>
@@ -82,25 +96,40 @@ h1 span { color: var(--accent) }
     <button class="ctrl" id="undo" aria-label="1手戻す"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 14L4 9l5-5"/><path d="M4 9h11a5 5 0 0 1 0 10h-3"/></svg>戻す</button>
     <button class="ctrl" id="hint" aria-label="ヒント"><span class="n" id="hint-n">5</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z"/></svg>ヒント</button>
     <button class="ctrl main" id="add" aria-label="数字を足す"><span class="n" id="add-n">5</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>数字を足す</button>
-    <button class="ctrl" id="new" aria-label="新しいゲーム"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 1 0-2.3 5.7"/><path d="M20 4v7h-7"/></svg>最初から</button>
+    <button class="ctrl" id="stages" aria-label="ステージと難しさを選ぶ"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>ステージ</button>
   </div>
 </div>
 <div id="ov"></div>
 
 <script>
-const COLS = 9, START = 36, ADDS = 5, HINTS = 5;
+const COLS = 9, STAGES = 30;
+// 難しさ：はじめの数字の数、数字を足せる回数、ヒントの回数、はじめに消せる組の最低数、ステージが進むと増える数字
+const LEVELS = {
+  easy:   { name: "やさしい",   note: "数字が少なめ・助けが多め", start: 27, grow: 2, max: 45, adds: 7, hints: 8, minPairs: 8 },
+  normal: { name: "ふつう",     note: "はじめての人はここから",   start: 36, grow: 3, max: 63, adds: 5, hints: 5, minPairs: 4 },
+  hard:   { name: "むずかしい", note: "数字が多く・助けが少ない", start: 45, grow: 3, max: 72, adds: 3, hints: 2, minPairs: 2 },
+};
 const $ = id => document.getElementById(id);
 const store = { get(k, d) { try { const v = localStorage.getItem(k); return v == null ? d : JSON.parse(v); } catch { return d; } }, set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} } };
 let G, sel = null, hintPair = null, history = [];
+// 進み具合：難しさごとに、クリアしたステージと最高点
+const prog = () => store.get("tp-prog", { easy: {}, normal: {}, hard: {} });
+const unlocked = lv => { const p = prog()[lv] || {}; let n = 1; while (n < STAGES && p[n]) n++; return n; };
 
-function rnd() { return 1 + Math.floor(Math.random() * 9); }
-function newGame(stage = 1, score = 0) {
-  // 少しだけ消せる組を混ぜて、最初に詰まりにくくする
+// ステージごとに決まった盤になるよう、番号から作る乱数
+function rng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>> 0; let t = a; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+function stageParams(lv, stage) {
+  const L = LEVELS[lv], band = Math.floor((stage - 1) / 10); // 10ステージごとに助けが1回減る
+  return { count: Math.min(L.max, L.start + L.grow * (stage - 1)), adds: Math.max(1, L.adds - band), hints: Math.max(1, L.hints - band), minPairs: L.minPairs };
+}
+function startStage(lv, stage) {
+  const P = stageParams(lv, stage), r = rng(({ easy: 1, normal: 2, hard: 3 })[lv] * 100003 + stage * 7919);
   let cells;
-  do { cells = Array.from({ length: START }, () => ({ v: rnd(), gone: false })); } while (allPairs(cells).length < 4);
-  G = { cells, score, stage, adds: ADDS, hints: HINTS };
+  do { cells = Array.from({ length: P.count }, () => ({ v: 1 + Math.floor(r() * 9), gone: false })); } while (allPairs(cells).length < P.minPairs);
+  G = { cells, score: 0, lv, stage, adds: P.adds, hints: P.hints };
   sel = null; hintPair = null; history = [];
-  save(); render(); $("wrap").scrollTop = 0; say("");
+  save(); render(); $("wrap").scrollTop = 0;
+  say(`${LEVELS[lv].name}・ステージ ${stage}（数字 ${P.count}個・足せるのは ${P.adds}回）`);
 }
 const matchVal = (a, b) => a === b || a + b === 10;
 // 2つのマスが「間が消えた数字だけ」でつながっているか
@@ -108,15 +137,12 @@ function linked(cells, i, j) {
   if (i === j) return false;
   if (i > j) [i, j] = [j, i];
   const clear = idx => cells[idx].gone;
-  // 読む順（行の終わり→次の行の始まり）
   let ok = true; for (let k = i + 1; k < j; k++) if (!clear(k)) { ok = false; break; }
-  if (ok) return true;
+  if (ok) return true; // 読む順（行の終わり→次の行の始まり）
   const ri = Math.floor(i / COLS), ci = i % COLS, rj = Math.floor(j / COLS), cj = j % COLS;
   const dr = rj - ri, dc = cj - ci;
   let step = 0;
-  if (dc === 0) step = COLS;                       // たて
-  else if (dr === dc) step = COLS + 1;             // 右下ななめ
-  else if (dr === -dc) step = COLS - 1;            // 左下ななめ
+  if (dc === 0) step = COLS; else if (dr === dc) step = COLS + 1; else if (dr === -dc) step = COLS - 1;
   if (!step) return false;
   for (let k = i + step; k < j; k += step) if (!clear(k)) return false;
   return true;
@@ -139,11 +165,10 @@ function pick(i) {
   if (matchVal(a.v, c.v) && linked(G.cells, sel, i)) {
     history.push(JSON.stringify(G)); if (history.length > 30) history.shift();
     a.gone = true; c.gone = true;
-    let pts = a.v === c.v ? 1 : 2, rows = clearRows();
-    pts += rows * 10;
-    G.score += pts; sel = null;
+    let pts = a.v === c.v ? 1 : 2; const rows = clearRows();
+    pts += rows * 10; G.score += pts; sel = null;
     say(rows ? `${rows}行そろって消えました。+${pts}` : `+${pts}`);
-    if (!left()) { G.score += 100; save(); render(); return win(); }
+    if (!left()) { G.score += 100 + G.adds * 20; save(); render(); return win(); }
     save(); render(); checkStuck();
   } else {
     const el = $("board").children[i]; el.classList.remove("bad"); void el.offsetWidth; el.classList.add("bad");
@@ -151,9 +176,8 @@ function pick(i) {
     sel = i; render();
   }
 }
-// 全部消えた行を詰める
 function clearRows() {
-  let n = 0, out = [];
+  let n = 0; const out = [];
   for (let r = 0; r * COLS < G.cells.length; r++) {
     const row = G.cells.slice(r * COLS, r * COLS + COLS);
     if (row.length === COLS && row.every(c => c.gone)) n++; else out.push(...row);
@@ -179,22 +203,43 @@ function hint() {
 }
 function undo() {
   const s = history.pop(); if (!s) return;
-  const keep = { hints: G.hints }; G = JSON.parse(s); G.hints = keep.hints; sel = null; hintPair = null; save(); render(); say("1手戻しました");
+  const hints = G.hints; G = JSON.parse(s); G.hints = hints; sel = null; hintPair = null; save(); render(); say("1手戻しました");
 }
 function checkStuck() { if (!allPairs(G.cells).length) { if (G.adds > 0) say("消せる組がありません。「数字を足す」を押してください"); else lose(); } }
-function setBest() { const b = store.get("tp-best", 0); if (G.score > b) store.set("tp-best", G.score); }
 function win() {
-  setBest();
-  overlay(`<h2>クリア</h2><p>ステージ ${G.stage} の数字をすべて消しました</p><div class="big">${G.score}</div><button class="btn" id="next">次のステージへ</button>`);
-  $("next").onclick = () => { $("ov").innerHTML = ""; newGame(G.stage + 1, G.score); };
+  const p = prog(), rec = p[G.lv] || (p[G.lv] = {});
+  const best = Math.max(rec[G.stage] || 0, G.score); rec[G.stage] = best; store.set("tp-prog", p);
+  const last = G.stage >= STAGES;
+  overlay(`<h2>クリア</h2><p>${LEVELS[G.lv].name}・ステージ ${G.stage}</p><div class="big">${G.score}</div><p>このステージの最高 ${best}点${G.adds ? `（残った「数字を足す」1回につき+20点）` : ""}</p>
+    ${last ? `<p>${LEVELS[G.lv].name}の${STAGES}ステージをすべてクリアしました。</p><button class="btn" id="pick">ほかの難しさを選ぶ</button>` : `<button class="btn" id="next">ステージ ${G.stage + 1} へ</button><button class="btn ghost" id="pick">ステージを選ぶ</button>`}`);
+  if ($("next")) $("next").onclick = () => { closeOv(); startStage(G.lv, G.stage + 1); };
+  $("pick").onclick = () => openStages(G.lv);
 }
 function lose() {
-  setBest();
-  overlay(`<h2>ここまで</h2><p>消せる組がなく、数字も足せません</p><div class="big">${G.score}</div><button class="btn" id="again">新しいゲーム</button><button class="btn ghost" id="close">盤を見る</button>`);
-  $("again").onclick = () => { $("ov").innerHTML = ""; newGame(); };
-  $("close").onclick = () => { $("ov").innerHTML = ""; };
+  overlay(`<h2>ここまで</h2><p>消せる組がなく、数字も足せません</p><div class="big">${G.score}</div><button class="btn" id="again">このステージをやり直す</button><button class="btn ghost" id="pick">ステージを選ぶ</button><button class="btn ghost" id="close">盤を見る</button>`);
+  $("again").onclick = () => { closeOv(); startStage(G.lv, G.stage); };
+  $("pick").onclick = () => openStages(G.lv);
+  $("close").onclick = closeOv;
 }
-function overlay(html) { $("ov").innerHTML = `<div class="overlay"><div class="card" role="dialog" aria-modal="true">${html}</div></div>`; }
+// ステージと難しさを選ぶ
+function openStages(lv) {
+  lv = lv || G.lv; const p = prog()[lv] || {}, un = unlocked(lv);
+  const total = Object.values(p).filter(Boolean).length;
+  overlay(`<h2>ステージ</h2>
+    <div class="seg" role="group" aria-label="難しさ">${Object.entries(LEVELS).map(([k, L]) => `<button data-lv="${k}" aria-pressed="${k === lv}">${L.name}<small>${L.note}</small></button>`).join("")}</div>
+    <p class="note">${LEVELS[lv].name}：クリア ${total}/${STAGES}。ステージが進むほど数字が増え、10ステージごとに「数字を足す」とヒントが1回ずつ減ります。</p>
+    <div class="sgrid">${Array.from({ length: STAGES }, (_, i) => i + 1).map(n => { const done = !!p[n], open = n <= un, cur = G && G.lv === lv && G.stage === n;
+      return `<button class="sbtn ${done ? "done" : ""} ${cur ? "cur" : ""}" data-st="${n}" ${open ? "" : "disabled"} aria-label="ステージ${n}${done ? "（クリア済み・最高" + p[n] + "点）" : open ? "" : "（まだ選べません）"}">${n}${open ? "" : `<span class="lock">🔒</span>`}</button>`; }).join("")}</div>
+    <p class="note">黒いマスはクリア済み。前のステージをクリアすると、次が選べるようになります。</p>
+    ${G && G.lv === lv ? `<button class="btn ghost" id="retry">今のステージ（${G.stage}）をやり直す</button>` : ""}
+    <button class="btn ghost" id="close">閉じる</button>`, true);
+  document.querySelectorAll("[data-lv]").forEach(b => b.onclick = () => openStages(b.dataset.lv));
+  document.querySelectorAll("[data-st]").forEach(b => b.onclick = () => { closeOv(); startStage(lv, Number(b.dataset.st)); });
+  if ($("retry")) $("retry").onclick = () => { closeOv(); startStage(G.lv, G.stage); };
+  $("close").onclick = closeOv;
+}
+function overlay(html, wide) { $("ov").innerHTML = `<div class="overlay"><div class="card ${wide ? "wide" : ""}" role="dialog" aria-modal="true">${html}</div></div>`; }
+function closeOv() { $("ov").innerHTML = ""; }
 function say(t) { $("msg").textContent = t; }
 function save() { store.set("tp-game", G); }
 
@@ -202,23 +247,23 @@ function render() {
   const n = G.cells.length, pad = (COLS - n % COLS) % COLS;
   $("board").innerHTML = G.cells.map((c, i) => `<button class="cell ${c.gone ? "gone" : ""} ${sel === i ? "sel" : ""} ${hintPair && hintPair.includes(i) ? "hint" : ""}" data-i="${i}" ${c.gone ? 'aria-disabled="true" tabindex="-1"' : ""} aria-label="${c.gone ? "消えた" : ""}${c.v}">${c.v}</button>`).join("")
     + Array.from({ length: pad + COLS * Math.max(0, 4 - Math.ceil(n / COLS)) }, () => `<span class="cell empty"></span>`).join("");
+  const rec = (prog()[G.lv] || {})[G.stage] || 0;
   $("score").textContent = G.score;
-  $("best").textContent = Math.max(store.get("tp-best", 0), G.score);
+  $("best").textContent = Math.max(rec, G.score);
   $("left").textContent = left();
-  $("sub").textContent = `ステージ ${G.stage}`;
+  $("sub").innerHTML = `<span class="lvl">${LEVELS[G.lv].name}</span>ステージ ${G.stage} / ${STAGES}`;
   $("add-n").textContent = G.adds; $("add").disabled = G.adds <= 0;
   $("hint-n").textContent = G.hints; $("hint").disabled = G.hints <= 0;
   $("undo").disabled = !history.length;
 }
 $("board").addEventListener("click", e => { const b = e.target.closest("[data-i]"); if (b) pick(Number(b.dataset.i)); });
-$("add").onclick = addNumbers; $("hint").onclick = hint; $("undo").onclick = undo;
-$("new").onclick = () => {
-  overlay(`<h2>最初から</h2><p>今のゲームをやめて、新しく始めますか？</p><button class="btn" id="yes">新しく始める</button><button class="btn ghost" id="no">続ける</button>`);
-  $("yes").onclick = () => { setBest(); $("ov").innerHTML = ""; newGame(); };
-  $("no").onclick = () => { $("ov").innerHTML = ""; };
-};
+$("add").onclick = addNumbers; $("hint").onclick = hint; $("undo").onclick = undo; $("stages").onclick = () => openStages();
+// 続きから。前の版の保存（難しさなし）は「ふつう」の続きとして扱う
 const saved = store.get("tp-game", null);
-if (saved && Array.isArray(saved.cells) && saved.cells.some(c => !c.gone)) { G = saved; render(); } else newGame();
+if (saved && Array.isArray(saved.cells) && saved.cells.some(c => !c.gone)) {
+  G = saved; if (!LEVELS[G.lv]) { G.lv = "normal"; G.stage = Math.min(STAGES, G.stage || 1); }
+  render();
+} else { G = null; startStage("normal", unlocked("normal")); openStages("normal"); }
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
 </body></html>
